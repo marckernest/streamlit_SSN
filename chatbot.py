@@ -204,6 +204,7 @@ if "audio_processed" not in st.session_state:
 if audio_file is not None and not st.session_state.audio_processed:
     st.audio(audio_file)
     st.write("Audio file received!")
+    st.write(f"Audio file type: {audio_file.type}, size: {audio_file.size}")
     with st.spinner("Transcribing..."):
         with open("temp_audio.wav", "wb") as f:
             f.write(audio_file.getbuffer())
@@ -215,6 +216,7 @@ if audio_file is not None and not st.session_state.audio_processed:
         user_input = transcript.text
         st.write("**Transcription:**")
         st.write(user_input)
+        st.write(f"Transcription raw response: {transcript}")
         os.remove("temp_audio.wav")
         process_user_input(user_input)
     st.session_state.audio_processed = True
