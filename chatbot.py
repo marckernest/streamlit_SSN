@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from ssa_lookup import get_ssa_office_link
 import base64
 import tempfile
+import wave
 
 load_dotenv()
 
@@ -220,6 +221,15 @@ if audio_file is not None and not st.session_state.audio_processed:
         os.remove("temp_audio.wav")
         process_user_input(user_input)
     st.session_state.audio_processed = True
+
+try:
+    with wave.open("temp_audio.wav", "rb") as wav_file:
+        st.write(f"Channels: {wav_file.getnchannels()}")
+        st.write(f"Sample width: {wav_file.getsampwidth()}")
+        st.write(f"Frame rate: {wav_file.getframerate()}")
+        st.write(f"Number of frames: {wav_file.getnframes()}")
+except Exception as e:
+    st.write(f"Could not read WAV info: {e}")
 
 if audio_file is None and st.session_state.audio_processed:
     st.session_state.audio_processed = False
