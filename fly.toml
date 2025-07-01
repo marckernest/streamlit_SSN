@@ -1,0 +1,7 @@
+app = "streamlit-ssn"  # <-- Change this to your Fly.io app name
+primary_region = "California"
+[build]
+  image = "paketobuildpacks/builder:base"
+
+[build.args]
+  BP_CPYTHON_VERSION = "3.12"
