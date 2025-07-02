@@ -1,4 +1,4 @@
-app = "ssnavi"  # <-- Change this to your Fly.io app name
+app = "streamlit-ssn"  # <-- Change this to your Fly.io app name
 primary_region = "lax"
 
 [[services]]
