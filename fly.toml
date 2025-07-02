@@ -1,7 +1,20 @@
-app = "streamlit-ssn"  # <-- Change this to your Fly.io app name
-primary_region = "California"
+app = "ssnavi"  # <-- Change this to your Fly.io app name
+primary_region = "lax"
+
 [build]
-  image = "paketobuildpacks/builder:base"
+  image = "mcr.microsoft.com/devcontainers/python:1-3.12-bullseye"
 
 [build.args]
   BP_CPYTHON_VERSION = "3.12"
+
+[[services]]
+  internal_port = 8501
+  protocol = "tcp"
+
+  [[services.ports]]
+    handlers = ["http"]
+    port = 80
+
+  [[services.ports]]
+    handlers = ["tls", "http"]
+    port = 443
