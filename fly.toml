@@ -1,9 +1,6 @@
 app = "ssnavi"  # <-- Change this to your Fly.io app name
 primary_region = "lax"
 
-[build.args]
-  BP_CPYTHON_VERSION = "3.12"
-
 [[services]]
   internal_port = 8501
   protocol = "tcp"
