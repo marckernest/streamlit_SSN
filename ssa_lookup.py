@@ -1,7 +1,12 @@
+import re
 import requests
 from bs4 import BeautifulSoup
 
 def get_ssa_office_link(zipcode):
+    # Fix 3: Validate ZIP code before making any external request
+    if not re.fullmatch(r"\d{5}", str(zipcode)):
+        return "Please provide a valid 5-digit U.S. ZIP code."
+
     url = "https://secure.ssa.gov/ICON/ic001.action"
     data = {"zipCodeSearched": zipcode, "locate": "Locate"}
     headers = {
@@ -11,7 +16,15 @@ def get_ssa_office_link(zipcode):
             "Chrome/124.0.0.0 Safari/537.36"
         )
     }
-    response = requests.post(url, data=data, headers=headers)
+    # Fix 4 & 6: Add timeout and catch network errors gracefully
+    try:
+        response = requests.post(url, data=data, headers=headers, timeout=10)
+    except requests.exceptions.RequestException:
+        return (
+            "Unable to reach the SSA website right now. "
+            "Please try again later or call the SSA at 1-800-772-1213."
+        )
+
     soup = BeautifulSoup(response.text, "html.parser")
     table = soup.find("table", class_="icon-results-table")
 
@@ -32,9 +45,11 @@ def get_ssa_office_link(zipcode):
                 if hours_table:
                     hours = []
                     for hrow in hours_table.find_all("tr"):
-                        day = hrow.find("th").get_text(strip=True)
-                        time = hrow.find("td").get_text(strip=True)
-                        hours.append(f"{day}: {time}")
+                        # Fix 7: Guard against missing th/td in hours rows
+                        day_th = hrow.find("th")
+                        time_td = hrow.find("td")
+                        if day_th and time_td:
+                            hours.append(f"{day_th.get_text(strip=True)}: {time_td.get_text(strip=True)}")
                     info.append(f"{label}\n" + "\n".join(hours))
                 continue
             else:
