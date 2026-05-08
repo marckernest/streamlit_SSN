@@ -8,3 +8,5 @@ __pycache__/
 .env
 temp_audio.wav
 ffmpeg/
+bfg.jar
+*.jar

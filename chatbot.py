@@ -1,18 +1,12 @@
 import streamlit as st
 import openai
-import pandas as pd
 import os
 import json
 import time
-import requests
 import re
-from math import radians, cos, sin, sqrt, atan2
-from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from ssa_lookup import get_ssa_office_link
-import base64
 import tempfile
-import wave
 
 load_dotenv()
 
@@ -91,6 +85,11 @@ if not ASSISTANT_ID:
 if "messages" not in st.session_state:
     st.session_state.messages = [{"role": "assistant", "content": "Hello! I'm here to help you access senior services like Social Security, pensions, and more. What do you need help with today?"}]
 
+# Fix 12: Session-level rate limiting to prevent runaway API costs
+MAX_API_CALLS_PER_SESSION = 50
+if "api_call_count" not in st.session_state:
+    st.session_state.api_call_count = 0
+
 # Render chat history
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
@@ -105,22 +104,23 @@ if "voice_output" not in st.session_state:
 st.session_state.voice_output = st.checkbox("🔊 Enable Voice Output", value=st.session_state.voice_output)
 
 def speak_text(text):
-    tts_response = openai.audio.speech.create(
-        model="tts-1",
-        voice="nova",
-        input=text
-    )
-    audio_bytes = tts_response.content
-    b64 = base64.b64encode(audio_bytes).decode()
-    audio_html = f"""
-        <audio autoplay>
-            <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
-            Your browser does not support the audio element.
-        </audio>
-    """
-    st.markdown(audio_html, unsafe_allow_html=True)
+    # Fix 8: Use st.audio instead of unsafe raw HTML to avoid HTML injection
+    try:
+        tts_response = openai.audio.speech.create(
+            model="tts-1",
+            voice="nova",
+            input=text
+        )
+        st.audio(tts_response.content, format="audio/mp3", autoplay=True)
+    except openai.OpenAIError:
+        pass  # Voice output is best-effort; silently skip if TTS fails
 
 def process_user_input(user_input):
+    # Fix 12: Enforce session-level rate limit on chat API calls
+    if st.session_state.api_call_count >= MAX_API_CALLS_PER_SESSION:
+        st.warning("You have reached the maximum number of requests for this session.")
+        return
+
     st.session_state.messages.append({"role": "user", "content": user_input})
     st.chat_message("user").write(user_input)
 
@@ -133,6 +133,7 @@ def process_user_input(user_input):
     if zip_match and (ssa_keywords or st.session_state.ssa_intent):
         zipcode = zip_match.group(1)
         response_text = get_ssa_office_link(zipcode)
+        st.session_state.api_call_count += 1
         st.session_state.messages.append({"role": "assistant", "content": response_text})
         st.chat_message("assistant").write(response_text)
         if st.session_state.voice_output:
@@ -151,13 +152,19 @@ def process_user_input(user_input):
         )
 
         with st.spinner("Thinking..."):
-            while True:
+            # 120 iterations at 1 second each = ~2 minutes maximum wait
+            max_poll_iterations = 120
+            terminal_states = {"failed", "cancelled", "expired", "timed_out"}
+            for _ in range(max_poll_iterations):
                 run = client.beta.threads.runs.retrieve(
                     thread_id=thread.id,
                     run_id=run.id
                 )
                 if run.status == "completed":
                     break
+                if run.status in terminal_states:
+                    st.error(f"The assistant could not complete the request (status: {run.status}). Please try again.")
+                    return
                 if run.status == "requires_action":
                     tool_call = run.required_action.submit_tool_outputs.tool_calls[0]
                     name = tool_call.function.name
@@ -179,10 +186,14 @@ def process_user_input(user_input):
                         }]
                     )
                 time.sleep(1)
+            else:
+                st.error("The assistant timed out. Please try again.")
+                return
 
         messages = client.beta.threads.messages.list(thread_id=thread.id)
         last_message = messages.data[0]
         assistant_reply = last_message.content[0].text.value
+        st.session_state.api_call_count += 1
 
         st.session_state.messages.append({"role": "assistant", "content": assistant_reply})
         st.chat_message("assistant").write(assistant_reply)
@@ -204,32 +215,27 @@ if "audio_processed" not in st.session_state:
 
 if audio_file is not None and not st.session_state.audio_processed:
     st.audio(audio_file)
-    st.write("Audio file received!")
-    st.write(f"Audio file type: {audio_file.type}, size: {audio_file.size}")
-    with st.spinner("Transcribing..."):
-        with open("temp_audio.wav", "wb") as f:
-            f.write(audio_file.getbuffer())
-        with open("temp_audio.wav", "rb") as f:
-            transcript = openai.audio.transcriptions.create(
-                model="whisper-1",
-                file=f
-            )
-        user_input = transcript.text
-        st.write("**Transcription:**")
-        st.write(user_input)
-        st.write(f"Transcription raw response: {transcript}")
-        os.remove("temp_audio.wav")
-        process_user_input(user_input)
-    st.session_state.audio_processed = True
-
-try:
-    with wave.open("temp_audio.wav", "rb") as wav_file:
-        st.write(f"Channels: {wav_file.getnchannels()}")
-        st.write(f"Sample width: {wav_file.getsampwidth()}")
-        st.write(f"Frame rate: {wav_file.getframerate()}")
-        st.write(f"Number of frames: {wav_file.getnframes()}")
-except Exception as e:
-    st.write(f"Could not read WAV info: {e}")
+    # Fix 12: Enforce session-level rate limit on transcription calls
+    if st.session_state.api_call_count >= MAX_API_CALLS_PER_SESSION:
+        st.warning("You have reached the maximum number of requests for this session.")
+    else:
+        with st.spinner("Transcribing..."):
+            # Fix 1: Use a secure per-request temp file instead of a shared hardcoded path
+            tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+            try:
+                tmp.write(audio_file.getbuffer())
+                tmp.flush()
+                tmp.close()
+                with open(tmp.name, "rb") as f:
+                    transcript = openai.audio.transcriptions.create(
+                        model="whisper-1",
+                        file=f
+                    )
+                st.session_state.api_call_count += 1
+            finally:
+                os.remove(tmp.name)
+            process_user_input(transcript.text)
+        st.session_state.audio_processed = True
 
 if audio_file is None and st.session_state.audio_processed:
     st.session_state.audio_processed = False
